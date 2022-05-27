@@ -69,7 +69,7 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Acmem{
     if response.clicked(){
 	Acmem::Chosen(i)
-    } else if response.hovered() {
+    } else if response.ctx.input().pointer.is_moving() && response.hovered() {
 	Acmem::Marked(i)
     } else {
 	Acmem::Nothing
