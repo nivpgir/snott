@@ -33,7 +33,7 @@ impl eframe::App for Snotter {
 		.filter_map(|f|f.file_name().to_string_lossy().to_string()
 			    .contains(&self.search_query)
 			    .then(||f.file_name().to_string_lossy().to_string()))
-		.take(2)
+		// .take(2)
 		.collect();
 	    ui.add(super::autocomplete_popup::AutocompletePopup::new(
 		file_candidates,

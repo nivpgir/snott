@@ -37,11 +37,15 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 	ui.memory().close_popup();
 	self.parent
     }
-    fn create_autocomplete_labels(&self, ui: &mut egui::Ui, marked_value: Acmem) -> Vec<Acmem>{
+    fn create_autocomplete_labels(&self, ui: &mut egui::Ui, marked_value: Acmem)
+				  -> Option<Vec<egui::Response>>{
 
-	self.items.iter().enumerate().map(move |(i, item)| {
-	    (i, ui.selectable_label(marked_value == Acmem::Marked(i) ,item))
-	}).map(check_mouse_interactions).collect::<Vec<_>>()
+	egui::popup_below_widget(ui, self.id(), &self.parent, |ui|{
+	    self.items
+		.iter()
+		.enumerate()
+		.map(|(i, item)|ui.selectable_label(marked_value == Acmem::Marked(i) ,item)
+		)}.collect())
     }
 
     fn update_mark_by_keyboard(&mut self, ui: &mut egui::Ui, mark: Acmem) -> Acmem{
@@ -73,9 +77,10 @@ fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Acmem{
 }
 
 
-fn collect_clicked_and_hovered_labels(label_mouse_interactions: Vec<Acmem>)
+fn collect_clicked_and_hovered_items(mouse_interactions: Vec<egui::Response>)
 			       -> Acmem{
-    label_mouse_interactions.into_iter()
+    mouse_interactions.into_iter().enumerate()
+	.map(check_mouse_interactions)
 	.fold(Acmem::Nothing, |prev, next|{
 	    match (prev, next){
 		(Acmem::Nothing, other) => other,
@@ -94,12 +99,8 @@ impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
 	}
 	let mut marked_value: Acmem = *ui.memory().data.get_temp_mut_or(self.id(), Acmem::Nothing);
 
-	if let Some(popup) = egui::popup_below_widget(
-	    ui,
-	    self.id(),
-	    &self.parent,
-	    |ui| self.create_autocomplete_labels(ui, marked_value)) {
-	    marked_value = match collect_clicked_and_hovered_labels(popup){
+	if let Some(label_responses) = self.create_autocomplete_labels(ui, marked_value){
+	    marked_value = match collect_clicked_and_hovered_items(label_responses){
 		Acmem::Chosen(i) => return { dbg!("click"); self.do_selection(i, ui) },
 		m @ Acmem::Marked(_) => m,
 		_ => marked_value
