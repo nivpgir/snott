@@ -50,20 +50,15 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 
     fn update_mark_by_keyboard(&mut self, ui: &mut egui::Ui, mark: Acmem) -> Acmem{
 	use egui::Key;
-	let ret = match (mark, &ui.input().keys_down){
-	    (v, keys) if keys.contains(&Key::Enter) => v.into_choice(),
-	    (v, keys) if keys.contains(&Key::ArrowDown) => v.inc().clamp(self.items.len()),
-	    (v, keys) if keys.contains(&Key::ArrowUp) => v.dec().clamp(self.items.len()),
-	    (v, _) => v
-	};
-	if ret != mark{
-	    self.parent.mark_changed()
+	if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
+	    mark.dec().clamp(self.items.len())
+	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowDown){
+	    mark.inc().clamp(self.items.len())
+	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::Enter){
+	    mark.into_choice()
+	} else {
+	    mark
 	}
-	ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp).then(||Key::ArrowUp);
-	ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowDown).then(||Key::ArrowDown);
-	ui.input_mut().consume_key(Modifiers::NONE, Key::Enter).then(||Key::Enter);
-	ret
-
     }
 }
 fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Acmem{
