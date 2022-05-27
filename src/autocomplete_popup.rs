@@ -101,7 +101,7 @@ impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
 
 	if let Some(label_responses) = self.create_autocomplete_labels(ui, marked_value){
 	    marked_value = match collect_clicked_and_hovered_items(label_responses){
-		Acmem::Chosen(i) => return { dbg!("click"); self.do_selection(i, ui) },
+		Acmem::Chosen(i) => { dbg!("click"); return self.do_selection(i, ui) },
 		m @ Acmem::Marked(_) => m,
 		_ => marked_value
 	    };
@@ -109,7 +109,6 @@ impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
 	    marked_value = self.update_mark_by_keyboard(ui, marked_value);
 
 	    if let Acmem::Chosen(i) = marked_value{
-		dbg!(marked_value);
 		dbg!("enter");
 		return self.do_selection(i, ui);
 	    }
