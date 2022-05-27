@@ -29,14 +29,14 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 	    select_action
 	}
     }
-    fn do_selection(self, selection: usize, ui: &mut egui::Ui) -> egui::Response{
+
+    fn do_selection(&mut self, selection: usize){
 	dbg!(selection);
 	let selected_value = self.items[selection].clone();
-	let mut action = self.select_action;
+	let action = &mut self.select_action;
 	action(selected_value);
-	ui.memory().close_popup();
-	self.parent
     }
+
     fn create_autocomplete_labels(&self, ui: &mut egui::Ui, marked_value: Acmem)
 				  -> Option<Vec<egui::Response>>{
 
@@ -48,7 +48,7 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 		)}.collect())
     }
 
-    fn update_mark_by_keyboard(&mut self, ui: &mut egui::Ui, mark: Acmem) -> Acmem{
+    fn update_mark_by_keyboard(&mut self, mark: Acmem, ui: &mut egui::Ui) -> Acmem{
 	use egui::Key;
 	if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
 	    mark.dec().clamp(self.items.len())
@@ -72,19 +72,23 @@ fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Acmem{
 }
 
 
-fn collect_clicked_and_hovered_items(mouse_interactions: Vec<egui::Response>)
-			       -> Acmem{
-    mouse_interactions.into_iter().enumerate()
+fn update_mark_by_mouse_interaction(current_mark: Acmem, mouse_interactions: Vec<egui::Response>)
+				    -> Acmem{
+    use std::ops::ControlFlow;
+    let new_mark = mouse_interactions.into_iter().enumerate()
 	.map(check_mouse_interactions)
-	.fold(Acmem::Nothing, |prev, next|{
-	    match (prev, next){
-		(Acmem::Nothing, other) => other,
-		(other, Acmem::Nothing) => other,
-		(Acmem::Chosen(i), _) |
-		(Acmem::Marked(_), Acmem::Chosen(i)) => Acmem::Chosen(i),
-		(Acmem::Marked(i), Acmem::Marked(_)) => Acmem::Marked(i),
+	.try_fold(current_mark, |prev, next|{
+	    match prev.update(next){
+		m @ Acmem::Chosen(_) => ControlFlow::Break(m),
+		m => ControlFlow::Continue(m)
 	    }
-	})
+	});
+    match new_mark{
+    // for some reason there is no way of getting the inner value without matching,
+    // even when they both hold the same type, idk why...
+	ControlFlow::Break(v) => v,
+	ControlFlow::Continue(v) => v,
+    }
 }
 
 impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
@@ -92,25 +96,22 @@ impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
 	if self.parent.gained_focus(){
 	    ui.memory().open_popup(self.id())
 	}
-	let mut marked_value: Acmem = *ui.memory().data.get_temp_mut_or(self.id(), Acmem::Nothing);
 
+	let mut marked_value: Acmem = *ui.memory().data
+	    .get_temp_mut_or(self.id(), Acmem::Marked(0));
+
+	marked_value = self.update_mark_by_keyboard(marked_value, ui);
 	if let Some(label_responses) = self.create_autocomplete_labels(ui, marked_value){
-	    marked_value = match collect_clicked_and_hovered_items(label_responses){
-		Acmem::Chosen(i) => { dbg!("click"); return self.do_selection(i, ui) },
-		m @ Acmem::Marked(_) => m,
-		_ => marked_value
-	    };
-
-	    marked_value = self.update_mark_by_keyboard(ui, marked_value);
-
-	    if let Acmem::Chosen(i) = marked_value{
-		dbg!("enter");
-		return self.do_selection(i, ui);
-	    }
-
-	    ui.memory().data.insert_temp(self.id(), marked_value);
+	    marked_value = update_mark_by_mouse_interaction(marked_value, label_responses);
 	}
 
+	if let Acmem::Chosen(i) = marked_value{
+	    self.do_selection(i);
+	    ui.memory().data.insert_temp(self.id(), Acmem::Nothing);
+	    ui.memory().close_popup();
+	} else {
+	    ui.memory().data.insert_temp(self.id(), marked_value);
+	}
 	self.parent
     }
 }
@@ -146,5 +147,15 @@ impl AutocompleteMemory {
 	    Self::Nothing => Self::Chosen(0),
 	    choice => choice
 	}
+    }
+
+    pub(crate) fn update(self, other: Self) -> Self{
+	    match (self, other){
+		(Acmem::Nothing, other) => other,
+		(other, Acmem::Nothing) => other,
+		(Acmem::Chosen(i), _) |
+		(Acmem::Marked(_), Acmem::Chosen(i)) => Acmem::Chosen(i),
+		(Acmem::Marked(i), Acmem::Marked(_)) => Acmem::Marked(i),
+	    }
     }
 }
