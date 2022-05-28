@@ -1,6 +1,8 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::{RwLock}};
 
-use eframe::egui;
+use eframe::egui::{self, TextBuffer, WidgetText};
+
+use crate::autocomplete_popup::{AutcompleteOutput, AutocompletePopup, set_cursor_pos};
 
 #[derive(Debug)]
 pub(crate) struct Snotter {
@@ -19,27 +21,65 @@ impl Default for Snotter {
 }
 
 
+#[derive(Default)]
+struct SyncTextBuffer<T: TextBuffer>(RwLock<RefCell<T>>);
+
+#[derive(Clone, Debug)]
+struct MyWidgetText<T>(T);
+
+impl<T> Deref for MyWidgetText<T>{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for MyWidgetText<T>{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<MyWidgetText<PathBuf>> for WidgetText{
+    fn from(other: MyWidgetText<PathBuf>) -> Self {
+        other.0.to_string_lossy().to_string().into()
+    }
+}
+
 impl eframe::App for Snotter {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 	let files: Vec<_> = self.snots_dir.read_dir().unwrap()
 	    .map(|f|f.unwrap()).collect();
+	let file_candidates: Vec<_> = files.iter()
+	    .filter_map(|f|f.file_name().to_string_lossy().to_string()
+			.contains(self.search_query.as_str())
+			.then(||MyWidgetText(f.path())))
+	    .collect();
         custon_window_frame(ctx, frame, "snote", |ui|{
 	    ui.label(&self.snots_dir.to_string_lossy().to_string());
 	    egui::widgets::global_dark_light_mode_switch(ui);
-	    let search_bar = ui.add(egui::TextEdit::singleline(&mut self.search_query)
-				    .desired_width(ui.available_width()));
 
-	    let file_candidates: Vec<_> = files.iter()
-		.filter_map(|f|f.file_name().to_string_lossy().to_string()
-			    .contains(&self.search_query)
-			    .then(||f.file_name().to_string_lossy().to_string()))
-		// .take(2)
-		.collect();
-	    ui.add(super::autocomplete_popup::AutocompletePopup::new(
+	    let search_bar = egui::TextEdit::singleline(&mut self.search_query)
+		.desired_width(ui.available_width()).show(ui);
+
+	    let cursor = search_bar.cursor_range.map(|c|c.as_ccursor_range());
+	    AutocompletePopup::new(
 		file_candidates,
-		search_bar,
-		|chosen_value|{self.search_query = chosen_value}
-	    ));
+		&search_bar.response,
+		|choice|{
+		    self.search_query = choice.to_string_lossy().to_string();
+		}).show_popup(ui).and_then(|choice|{
+		    if let AutcompleteOutput::Chosen(_, _, text) =  choice{
+			self.search_query = text;
+		    };
+		    Some(())
+		});
+
+	    if let Some(c) = cursor {
+		set_cursor_pos(search_bar.response.id, ui, c);
+	    }
+
 	})
     }
 }

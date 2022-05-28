@@ -1,56 +1,81 @@
-use eframe::egui::{self, Modifiers, Widget};
+
+use eframe::egui::{self, Modifiers, TextEdit, Widget, WidgetText, text::CCursorRange};
 
 #[derive(Debug)]
-pub(crate) struct AutocompletePopup<F: FnMut(String)>{
-    items: Vec<String>,
+pub(crate) struct AutocompletePopup<F, C>
+where
+    F: FnOnce(&C),
+    C: Clone + Into<WidgetText>,
+{
+    items: Vec<C>,
     parent: egui::Response,
     select_action: F
+    // selection: Option<Candidate>
 }
 
-type Acmem = AutocompleteMemory;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum AutocompleteMemory{
+enum Selection{
     Chosen(usize),
     Marked(usize),
     Nothing
 }
 
-impl<F: FnMut(String)> AutocompletePopup<F>{
+#[derive(Debug)]
+pub enum AutcompleteOutput<C>{
+    Chosen(usize, C, String),
+    Marked(usize, C, String),
+}
+
+impl<F, C> AutocompletePopup<F, C>
+where
+    C: Clone + Into<WidgetText> + std::fmt::Debug,
+    F: FnOnce(&C)
+
+{
     pub fn id (&self) -> egui::Id{
 	self.parent.id.with("::ac")
     }
-    pub fn new(items: impl IntoIterator<Item=String>,
-	       parent: egui::Response,
+
+    pub fn new(items: impl IntoIterator<Item=C>,
+	       parent: &egui::Response,
 	       select_action: F) -> Self{
 	Self{
+	    select_action,
 	    items: items.into_iter().collect(),
-	    parent,
-	    select_action
+	    parent: parent.clone(),
 	}
     }
 
-    fn do_selection(&mut self, selection: usize){
-	dbg!(selection);
-	let selected_value = self.items[selection].clone();
-	let action = &mut self.select_action;
-	action(selected_value);
+    fn get_selection(&self, selection: Selection) -> Option<AutcompleteOutput<C>>{
+	selection.into_output(&self.items)
     }
+    // fn save_state(&self, ui: &mut egui::Ui, selection: Selection){
+    // 	match selection{
+    // 	    s @ Selection::Chosen(i) => ui.memory().close_popup(),
+    // 	    o => {o;}
+    // 	}
+    // }
 
-    fn create_autocomplete_labels(&self, ui: &mut egui::Ui, marked_value: Acmem)
+    // fn do_selection(&self, selection: usize){
+    // 	dbg!(selection);
+
+    // 	let action = self.select_action;
+    // 	action(&self.items[selection]);
+    // }
+
+    fn create_autocomplete_labels(&self, ui: &mut egui::Ui, marked_value: Selection)
 				  -> Option<Vec<egui::Response>>{
 
 	egui::popup_below_widget(ui, self.id(), &self.parent, |ui|{
-	    self.items
-		.iter()
-		.enumerate()
-		.map(|(i, item)|ui.selectable_label(marked_value == Acmem::Marked(i) ,item)
-		)}.collect())
+	    self.items.iter().enumerate()
+		.map(|(i, item)|{
+		    ui.selectable_label(marked_value == Selection::Marked(i) ,item.clone())
+		})}.collect())
     }
 
-    fn update_mark_by_keyboard(&mut self, mark: Acmem, ui: &mut egui::Ui) -> Acmem{
+    fn update_mark_by_keyboard(&mut self, mark: Selection, ui: &mut egui::Ui) -> Selection{
 	use egui::Key;
-	if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
+	let ret = if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
 	    mark.dec().clamp(self.items.len())
 	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowDown){
 	    mark.inc().clamp(self.items.len())
@@ -58,28 +83,67 @@ impl<F: FnMut(String)> AutocompletePopup<F>{
 	    mark.into_choice()
 	} else {
 	    mark
+	};
+	ret
+    }
+
+    pub fn show_popup(&mut self, ui: &mut egui::Ui) -> Option<AutcompleteOutput<C>>{
+	if self.parent.gained_focus(){
+	    ui.memory().open_popup(self.id())
 	}
+
+	let mut marked_value: Selection = *ui.memory().data
+	    .get_temp_mut_or(self.id(), Selection::Nothing);
+
+	marked_value = self.update_mark_by_keyboard(marked_value, ui);
+	if let Some(label_responses) = self.create_autocomplete_labels(ui, marked_value){
+	    marked_value = update_mark_by_mouse_interaction(marked_value, label_responses);
+	}
+
+	if let Selection::Chosen(_) = marked_value {
+	    ui.memory().data.insert_temp(self.id(), Selection::Nothing);
+	} else {
+	    ui.memory().data.insert_temp(self.id(), marked_value);
+	}
+	self.get_selection(marked_value)
+
     }
 }
-fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Acmem{
+
+pub fn get_cursor_pos(parent_id: egui::Id, ui: &egui::Ui) -> Option<CCursorRange>{
+    TextEdit::load_state(ui.ctx(), parent_id)
+	.and_then(|s|s.ccursor_range())
+}
+
+pub fn set_cursor_pos(parent_id: egui::Id, ui: &mut egui::Ui, cursor: CCursorRange) {
+    if let Some(mut state) = TextEdit::load_state(ui.ctx(), parent_id) {
+	state.set_ccursor_range(Some(cursor));
+	TextEdit::store_state(ui.ctx(), parent_id, state);
+    }
+}
+
+
+fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Selection{
     if response.clicked(){
-	Acmem::Chosen(i)
+	Selection::Chosen(i)
     } else if response.ctx.input().pointer.is_moving() && response.hovered() {
-	Acmem::Marked(i)
+	// TODO: BUG:
+	// for some reason response.hovered() is always false
+	Selection::Marked(i)
     } else {
-	Acmem::Nothing
+	Selection::Nothing
     }
 }
 
 
-fn update_mark_by_mouse_interaction(current_mark: Acmem, mouse_interactions: Vec<egui::Response>)
-				    -> Acmem{
+fn update_mark_by_mouse_interaction(current_mark: Selection, mouse_interactions: Vec<egui::Response>)
+				    -> Selection{
     use std::ops::ControlFlow;
     let new_mark = mouse_interactions.into_iter().enumerate()
 	.map(check_mouse_interactions)
 	.try_fold(current_mark, |prev, next|{
 	    match prev.update(next){
-		m @ Acmem::Chosen(_) => ControlFlow::Break(m),
+		m @ Selection::Chosen(_) => ControlFlow::Break(m),
 		m => ControlFlow::Continue(m)
 	    }
 	});
@@ -91,32 +155,21 @@ fn update_mark_by_mouse_interaction(current_mark: Acmem, mouse_interactions: Vec
     }
 }
 
-impl<F: FnMut(String)> Widget for AutocompletePopup<F>{
+impl<C, F> Widget for AutocompletePopup<F, C>
+where
+    C: Clone + Into<WidgetText> + std::fmt::Debug,
+    F: FnOnce(&C) {
+
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
-	if self.parent.gained_focus(){
-	    ui.memory().open_popup(self.id())
-	}
 
-	let mut marked_value: Acmem = *ui.memory().data
-	    .get_temp_mut_or(self.id(), Acmem::Marked(0));
-
-	marked_value = self.update_mark_by_keyboard(marked_value, ui);
-	if let Some(label_responses) = self.create_autocomplete_labels(ui, marked_value){
-	    marked_value = update_mark_by_mouse_interaction(marked_value, label_responses);
-	}
-
-	if let Acmem::Chosen(i) = marked_value{
-	    self.do_selection(i);
-	    ui.memory().data.insert_temp(self.id(), Acmem::Nothing);
-	    ui.memory().close_popup();
-	} else {
-	    ui.memory().data.insert_temp(self.id(), marked_value);
-	}
+	self.show_popup(ui);
 	self.parent
     }
 }
 
-impl AutocompleteMemory {
+
+
+impl Selection {
 
     pub(crate) fn dec(&self) -> Self {
 	match self {
@@ -151,11 +204,28 @@ impl AutocompleteMemory {
 
     pub(crate) fn update(self, other: Self) -> Self{
 	    match (self, other){
-		(Acmem::Nothing, other) => other,
-		(other, Acmem::Nothing) => other,
-		(Acmem::Chosen(i), _) |
-		(Acmem::Marked(_), Acmem::Chosen(i)) => Acmem::Chosen(i),
-		(Acmem::Marked(i), Acmem::Marked(_)) => Acmem::Marked(i),
+		(Selection::Nothing, other) => other,
+		(other, Selection::Nothing) => other,
+		(Selection::Chosen(i), _) |
+		(Selection::Marked(_), Selection::Chosen(i)) => Selection::Chosen(i),
+		(Selection::Marked(i), Selection::Marked(_)) => Selection::Marked(i),
 	    }
+    }
+
+    fn into_output<C: Clone + Into<WidgetText> + std::fmt::Debug>(self, items: &[C])
+								  -> Option<AutcompleteOutput<C>> {
+	let index = *match &self{
+	    Selection::Chosen(i) |
+	    Selection::Marked(i) => i,
+	    Selection::Nothing => return None
+	};
+	let value: C = items[index].clone();
+	let text: WidgetText = value.clone().into();
+	match self{
+	    Selection::Chosen(i) => Some(AutcompleteOutput::Chosen(i, value, text.text().to_string())),
+	    Selection::Marked(i) => Some(AutcompleteOutput::Marked(i, value, text.text().to_string())),
+	    _ => unreachable!()
+	}
+
     }
 }
