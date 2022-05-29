@@ -1,8 +1,8 @@
 use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::{RwLock}};
 
-use eframe::egui::{self, TextBuffer, WidgetText};
+use eframe::egui::{self, TextBuffer, TextEdit, WidgetText, text_edit::CCursorRange};
 
-use crate::autocomplete_popup::{AutcompleteOutput, AutocompletePopup, set_cursor_pos};
+use crate::autocomplete_popup::{AutcompleteOutput, AutocompletePopup};
 
 #[derive(Debug)]
 pub(crate) struct Snotter {
@@ -64,23 +64,29 @@ impl eframe::App for Snotter {
 		.desired_width(ui.available_width()).show(ui);
 
 	    let cursor = search_bar.cursor_range.map(|c|c.as_ccursor_range());
-	    AutocompletePopup::new(
-		file_candidates,
-		&search_bar.response,
-		|choice|{
-		    self.search_query = choice.to_string_lossy().to_string();
-		}).show_popup(ui).and_then(|choice|{
-		    if let AutcompleteOutput::Chosen(_, _, text) =  choice{
-			self.search_query = text;
-		    };
-		    Some(())
-		});
-
-	    if let Some(c) = cursor {
-		set_cursor_pos(search_bar.response.id, ui, c);
-	    }
-
+	    if let Some(AutcompleteOutput::Chosen(_v)) =
+		AutocompletePopup::new(file_candidates, &search_bar.response)
+		.show(ui) {
+		    if let Some(c) = cursor {
+			set_cursor_pos(search_bar.response.id, ui, c);
+		    }
+		    let p: PathBuf = _v.0;
+		    self.search_query = p.file_name().unwrap()
+			.to_string_lossy().to_string();
+		}
 	})
+    }
+}
+
+pub fn get_cursor_pos(parent_id: egui::Id, ui: &egui::Ui) -> Option<CCursorRange>{
+    TextEdit::load_state(ui.ctx(), parent_id)
+	.and_then(|s|s.ccursor_range())
+}
+
+pub fn set_cursor_pos(parent_id: egui::Id, ui: &mut egui::Ui, cursor: CCursorRange) {
+    if let Some(mut state) = TextEdit::load_state(ui.ctx(), parent_id) {
+	state.set_ccursor_range(Some(cursor));
+	TextEdit::store_state(ui.ctx(), parent_id, state);
     }
 }
 
