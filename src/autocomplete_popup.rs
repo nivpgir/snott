@@ -76,9 +76,9 @@ where
     fn update_mark_by_keyboard(&mut self, mark: Selection, ui: &mut egui::Ui) -> Selection{
 	use egui::Key;
 	let ret = if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
-	    mark.dec().clamp(self.items.len())
+	    mark.dec().clamp(self.items.len()-1)
 	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowDown){
-	    mark.inc().clamp(self.items.len())
+	    mark.inc().clamp(self.items.len()-1)
 	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::Enter){
 	    mark.into_choice()
 	} else {
