@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sy
 
 use eframe::egui::{self, TextBuffer, TextEdit, WidgetText, text_edit::CCursorRange};
 
-use crate::autocomplete_popup::{AutcompleteOutput, AutocompletePopup};
+use crate::autocomplete_popup::{AutocompleteOutput, AutocompletePopup};
 
 #[derive(Debug)]
 pub(crate) struct Snotter {
@@ -63,16 +63,20 @@ impl eframe::App for Snotter {
 	    let search_bar = egui::TextEdit::singleline(&mut self.search_query)
 		.desired_width(ui.available_width()).show(ui);
 
-	    let cursor = search_bar.cursor_range.map(|c|c.as_ccursor_range());
-	    if let Some(AutcompleteOutput::Chosen(_v)) =
+	    let cursor = search_bar.state.ccursor_range();
+	    if let Some(AutocompleteOutput::Chosen(_v)) =
 		AutocompletePopup::new(file_candidates, &search_bar.response)
 		.show(ui) {
-		    if let Some(c) = cursor {
-			set_cursor_pos(search_bar.response.id, ui, c);
-		    }
 		    let p: PathBuf = _v.0;
-		    self.search_query = p.file_name().unwrap()
-			.to_string_lossy().to_string();
+		    let completion = p.file_name().unwrap().to_string_lossy();
+
+		    self.search_query = completion.to_string();
+
+		    if let Some(c) = cursor {
+			let [_, last_cursor] = c.sorted();
+			set_cursor_pos(search_bar.response.id, ui,
+				       CCursorRange::one(last_cursor + completion.len()));
+		    }
 		}
 	})
     }
