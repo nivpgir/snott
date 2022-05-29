@@ -102,6 +102,7 @@ where
 
 	if let Selection::Chosen(_) = marked_value {
 	    ui.memory().data.insert_temp(self.id(), Selection::Nothing);
+	    ui.memory().close_popup();
 	} else {
 	    ui.memory().data.insert_temp(self.id(), marked_value);
 	}
