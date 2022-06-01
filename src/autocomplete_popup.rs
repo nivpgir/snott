@@ -1,5 +1,5 @@
 
-use eframe::{egui::{self, Modifiers, Widget, WidgetText}, emath::NumExt};
+use eframe::{egui::{self, Widget, WidgetText}, emath::NumExt};
 
 #[derive(Debug)]
 pub(crate) struct AutocompletePopup<C>
@@ -10,7 +10,6 @@ where
     parent: egui::Response,
 }
 
-type Selection = AutocompleteOutput<usize>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AutocompleteOutput<C>{
@@ -34,6 +33,7 @@ use AutocompleteOutput::*;
 //     scroll_offset: f32
 // }
 
+type Selection = AutocompleteOutput<usize>;
 impl<C> AutocompletePopup<C>
 where
     C: Clone + Into<WidgetText> + std::fmt::Debug,
@@ -51,8 +51,8 @@ where
 	}
     }
 
-    fn update_selection_by_keyboard(&self, selection: Selection, ui: &mut egui::Ui) -> Selection{
-	use egui::Key;
+    fn update_selection_by_keyboard(selection: Selection, ui: &mut egui::Ui) -> Selection{
+	use egui::{Modifiers, Key};
 	if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowUp){
 	    selection.dec()
 	} else if ui.input_mut().consume_key(Modifiers::NONE, Key::ArrowDown){
@@ -61,7 +61,7 @@ where
 	    selection.into_choice()
 	} else {
 	    selection
-	}.map(|c|c.at_most(self.items.len().saturating_sub(1)))
+	}
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<AutocompleteOutput<C>>{
@@ -77,7 +77,7 @@ where
 	);
 
 	if let Some(Chosen(_)) = dbg!(popup_response) {
-	    ui.memory().data.remove::<AutocompleteOutput<usize>>(self.id());
+	    ui.memory().data.remove::<Selection>(self.id());
 	    ui.memory().close_popup();
 	    self.parent.request_focus();
 	} else if let Some(selection) = popup_response{
@@ -89,32 +89,71 @@ where
     fn make_completion_widget(&self) -> impl FnOnce(&mut egui::Ui) -> Selection + '_{
 	|ui: &mut egui::Ui|{
 	    let prev_selection = *ui.memory().data
-		.get_temp_mut_or_default::<AutocompleteOutput<usize>>(self.id());
-	    let prev_scroll = *ui.memory().data.get_temp_mut_or_default::<f32>(self.id());
+		.get_temp_mut_or_default::<Selection>(self.id());
 	    let spacing = ui.spacing().item_spacing.y;
 	    let row_height = ui.text_style_height(&egui::TextStyle::Body);
-	    let selection_pos = prev_selection.into_inner() as f32 *
-		(row_height + spacing);
-	    let rect_height = ui.max_rect().height() - ui.max_rect().top();
-	    let new_scroll = prev_scroll
-		.at_least(selection_pos - rect_height + row_height)
-		.at_most(selection_pos);
-	    let selected_index = prev_selection.into_inner();
-	    let scroll = egui::ScrollArea::vertical()
-		.vertical_scroll_offset(new_scroll)
+	    let mut scroll = egui::ScrollArea::vertical()
+	    // .vertical_scroll_offset(new_scroll)
 		.show_rows(ui, row_height, self.items.len(), |ui, rows|{
-		    rows.map(|row_num|(row_num, ui.selectable_label(selected_index == row_num, self.items[row_num].clone())))
+		    let mouse_selection = rows.clone()
+			.map(|row_num| self.draw_label(ui, prev_selection.into_inner(), row_num))
+			.zip(rows.clone())
 			.filter_map(check_mouse_interactions)
-			.find(|s|s.is_chosen())
+			.find(|s|s.is_chosen());
+		    // let keyboard_selection = Self::update_selection_by_keyboard(viewed_select, ui);
+		    // mouse_selection.unwrap_or(keyboard_selection)
+		    (mouse_selection, rows.start, rows.end)
 		});
-	    let keyboard_selection = self.update_selection_by_keyboard(prev_selection, ui);
-	    ui.memory().data.insert_temp(self.id(), scroll.state.offset.y);
-	    scroll.inner.unwrap_or(keyboard_selection)
+	    // let rect_height = ui.max_rect().height() - ui.max_rect().top() - spacing;
+	    let rect_height = scroll.inner_rect.height() - scroll.inner_rect.top();
+	    let prev_scroll = *ui.memory().data.get_temp_mut_or_default::<f32>(self.id());
+	    let (mouse, min_row, max_row) = scroll.inner;
+	    let (new_scroll_offset, new_selection) = if scroll.state.offset.y != prev_scroll{
+		let new_offset = scroll.state.offset.y;
+		let min_allowed_row = (new_offset / (row_height + spacing)).ceil() as usize;
+		let max_allowed_row = ((new_offset + rect_height) / (row_height + spacing)).floor() as usize;
+		let new_selection = mouse.unwrap_or(prev_selection)
+		    .map(|i|i.clamp(min_allowed_row, max_allowed_row - 1));
+		let new_scroll = scroll.state.offset.y;
+		ui.memory().data.insert_temp(self.id(), new_selection);
+		(new_scroll, new_selection)
+	    } else {
+		let keyboard = Self::update_selection_by_keyboard(prev_selection, ui);
+		let new_selection = if keyboard != prev_selection{
+		    keyboard
+		} else {
+		    mouse.unwrap_or(prev_selection)
+		};
+		let selection_pos = new_selection.into_inner() as f32 *
+		    (row_height + spacing);
+		let new_scroll = prev_scroll
+		    .at_least(selection_pos - rect_height + row_height + spacing)
+		    .at_most(selection_pos);
+		scroll.state.offset.y = new_scroll;
+		scroll.state.store(ui.ctx(), scroll.id);
+		(new_scroll, new_selection)
+	    };
+	    ui.memory().data.insert_temp(self.id(), new_scroll_offset);
+	    // ui.memory().data.insert_temp(self.id(), new_selection);
+	    // mouse_selection.inner
+	    // mouse_selection.inner.0
+	    // 	.map(|select|select.map(|i|i.clamp(rows.clone().start, rows.end)))
+	    // 	.map(|v| Self::update_selection_by_keyboard(v, ui))
+	    // 	.unwrap_or(prev_selection)
+	    new_selection
 	}
+    }
+
+    fn draw_label(&self, ui: &mut egui::Ui, selected_num: usize, row_num: usize) -> egui::Response{
+	let is_marked = selected_num == row_num;
+	let item = self.items[row_num].clone();
+	ui.selectable_label(is_marked, item)
     }
 }
 
-fn check_mouse_interactions((i, response): (usize, egui::Response)) -> Option<Selection>{
+
+
+fn check_mouse_interactions((response, i): (egui::Response, usize)) -> Option<Selection>{
     if response.clicked(){
 	Some(Chosen(i))
     } else if response.ctx.input().pointer.is_moving() && response.hovered() {
