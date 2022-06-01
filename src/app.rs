@@ -82,11 +82,6 @@ impl eframe::App for Snotter {
     }
 }
 
-pub fn get_cursor_pos(parent_id: egui::Id, ui: &egui::Ui) -> Option<CCursorRange>{
-    TextEdit::load_state(ui.ctx(), parent_id)
-	.and_then(|s|s.ccursor_range())
-}
-
 pub fn set_cursor_pos(parent_id: egui::Id, ui: &mut egui::Ui, cursor: CCursorRange) {
     if let Some(mut state) = TextEdit::load_state(ui.ctx(), parent_id) {
 	state.set_ccursor_range(Some(cursor));
