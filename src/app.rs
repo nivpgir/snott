@@ -1,6 +1,6 @@
 use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::{RwLock}};
 
-use eframe::egui::{self, TextBuffer, TextEdit, WidgetText, text_edit::CCursorRange};
+use eframe::egui::{self, TextBuffer, WidgetText, text_edit::{CCursorRange, TextEditOutput}};
 
 use crate::autocomplete_popup::{AutocompleteOutput, AutocompletePopup};
 
@@ -27,6 +27,15 @@ struct SyncTextBuffer<T: TextBuffer>(RwLock<RefCell<T>>);
 #[derive(Clone, Debug)]
 struct MyWidgetText<T>(T);
 
+impl std::fmt::Display for MyWidgetText<PathBuf>{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	write!(f, "{}",
+	       self.0.to_path_buf().file_name()
+	       .expect("failed to get filename!")
+	       .to_string_lossy())
+    }
+}
+
 impl<T> Deref for MyWidgetText<T>{
     type Target = T;
 
@@ -43,7 +52,7 @@ impl<T> DerefMut for MyWidgetText<T>{
 
 impl From<MyWidgetText<PathBuf>> for WidgetText{
     fn from(other: MyWidgetText<PathBuf>) -> Self {
-        other.0.to_string_lossy().to_string().into()
+        other.to_string_lossy().to_string().into()
     }
 }
 
@@ -63,29 +72,36 @@ impl eframe::App for Snotter {
 	    let search_bar = egui::TextEdit::singleline(&mut self.search_query)
 		.desired_width(ui.available_width()).show(ui);
 
-	    let cursor = search_bar.state.ccursor_range();
-	    if let Some(AutocompleteOutput::Chosen(_v)) =
-		AutocompletePopup::new(file_candidates, &search_bar.response)
-		.show(ui, &search_bar.response) {
-		    let p: PathBuf = _v.0;
-		    let completion = p.file_name().unwrap().to_string_lossy();
+	    let ac_output = AutocompletePopup::new(file_candidates, &search_bar.response)
+		.show(ui, &search_bar.response);
+	    self.update_from_autocomplete(ac_output, ctx, search_bar);
 
-		    self.search_query = completion.to_string();
-
-		    if let Some(c) = cursor {
-			let [_, last_cursor] = c.sorted();
-			set_cursor_pos(search_bar.response.id, ui,
-				       CCursorRange::one(last_cursor + completion.len()));
-		    }
-		}
 	})
     }
 }
 
-pub fn set_cursor_pos(parent_id: egui::Id, ui: &mut egui::Ui, cursor: CCursorRange) {
-    if let Some(mut state) = TextEdit::load_state(ui.ctx(), parent_id) {
-	state.set_ccursor_range(Some(cursor));
-	TextEdit::store_state(ui.ctx(), parent_id, state);
+type ACItem = AutocompleteOutput<MyWidgetText<PathBuf>>;
+impl Snotter{
+    fn update_query_from_autocomplete(&mut self, chosen: MyWidgetText<PathBuf>){
+	self.search_query = chosen.to_string();
+    }
+
+    fn update_from_autocomplete(&mut self, s: Option<ACItem>,
+				ctx: &egui::Context,
+				search_bar: TextEditOutput){
+	if let Some(AutocompleteOutput::Chosen(chosen)) = s {
+	    self.update_query_from_autocomplete(chosen);
+	    self.update_cursor_from_autocomplete(ctx, search_bar);
+
+	}
+    }
+    fn update_cursor_from_autocomplete(&self, ctx: &egui::Context, mut search_bar: TextEditOutput){
+	if let Some(c) = search_bar.state.ccursor_range() {
+	    let [_, last_cursor] = c.sorted();
+	    let cursor = CCursorRange::one(last_cursor + self.search_query.len());
+	    search_bar.state.set_ccursor_range(Some(cursor));
+	    search_bar.state.store(ctx, search_bar.response.id);
+	}
     }
 }
 
