@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::{RwLock}};
+use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::RwLock};
 
 use eframe::egui::{self, TextBuffer, WidgetText, text_edit::{CCursorRange, TextEditOutput}};
 
@@ -65,7 +65,7 @@ impl eframe::App for Snotter {
 			.contains(self.search_query.as_str())
 			.then(||MyWidgetText(f.path())))
 	    .collect();
-        custon_window_frame(ctx, frame, "snote", |ui|{
+        custom_window_frame(ctx, frame, "snote", |ui|{
 	    ui.label(&self.snots_dir.to_string_lossy().to_string());
 	    egui::widgets::global_dark_light_mode_switch(ui);
 
@@ -105,7 +105,7 @@ impl Snotter{
     }
 }
 
-fn custon_window_frame(
+fn custom_window_frame(
     ctx: &egui::Context,
     frame: &mut eframe::Frame,
     title: &str,
