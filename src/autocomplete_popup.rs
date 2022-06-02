@@ -90,57 +90,46 @@ where
 	|ui: &mut egui::Ui|{
 	    let prev_selection = *ui.memory().data
 		.get_temp_mut_or_default::<Selection>(self.id());
-	    let spacing = ui.spacing().item_spacing.y;
+
+	    // draw
 	    let row_height = ui.text_style_height(&egui::TextStyle::Body);
 	    let mut scroll = egui::ScrollArea::vertical()
-	    // .vertical_scroll_offset(new_scroll)
 		.show_rows(ui, row_height, self.items.len(), |ui, rows|{
-		    let mouse_selection = rows.clone()
+		    rows.clone()
 			.map(|row_num| self.draw_label(ui, prev_selection.into_inner(), row_num))
-			.zip(rows.clone())
+			.zip(rows)
 			.filter_map(check_mouse_interactions)
-			.find(|s|s.is_chosen());
-		    // let keyboard_selection = Self::update_selection_by_keyboard(viewed_select, ui);
-		    // mouse_selection.unwrap_or(keyboard_selection)
-		    (mouse_selection, rows.start, rows.end)
+			.find(|s|s.is_chosen())
 		});
-	    // let rect_height = ui.max_rect().height() - ui.max_rect().top() - spacing;
+
+	    // move selection to viewed area after scroll
+	    let row_height_with_spacing = row_height + ui.spacing().item_spacing.y;
 	    let rect_height = scroll.inner_rect.height() - scroll.inner_rect.top();
-	    let prev_scroll = *ui.memory().data.get_temp_mut_or_default::<f32>(self.id());
-	    let (mouse, min_row, max_row) = scroll.inner;
-	    let (new_scroll_offset, new_selection) = if scroll.state.offset.y != prev_scroll{
+	    let clamped = {
 		let new_offset = scroll.state.offset.y;
-		let min_allowed_row = (new_offset / (row_height + spacing)).ceil() as usize;
-		let max_allowed_row = ((new_offset + rect_height) / (row_height + spacing)).floor() as usize;
-		let new_selection = mouse.unwrap_or(prev_selection)
-		    .map(|i|i.clamp(min_allowed_row, max_allowed_row - 1));
-		let new_scroll = scroll.state.offset.y;
-		ui.memory().data.insert_temp(self.id(), new_selection);
-		(new_scroll, new_selection)
-	    } else {
-		let keyboard = Self::update_selection_by_keyboard(prev_selection, ui);
-		let new_selection = if keyboard != prev_selection{
-		    keyboard
-		} else {
-		    mouse.unwrap_or(prev_selection)
-		};
-		let selection_pos = new_selection.into_inner() as f32 *
-		    (row_height + spacing);
-		let new_scroll = prev_scroll
-		    .at_least(selection_pos - rect_height + row_height + spacing)
-		    .at_most(selection_pos);
-		scroll.state.offset.y = new_scroll;
-		scroll.state.store(ui.ctx(), scroll.id);
-		(new_scroll, new_selection)
+		let min_allowed_row = (new_offset / row_height_with_spacing)
+		    .ceil() as usize;
+		let max_allowed_row = ((new_offset + rect_height) / row_height_with_spacing)
+		    .floor() as usize;
+		prev_selection.map(|i|i.clamp(min_allowed_row, max_allowed_row))
 	    };
-	    ui.memory().data.insert_temp(self.id(), new_scroll_offset);
-	    // ui.memory().data.insert_temp(self.id(), new_selection);
-	    // mouse_selection.inner
-	    // mouse_selection.inner.0
-	    // 	.map(|select|select.map(|i|i.clamp(rows.clone().start, rows.end)))
-	    // 	.map(|v| Self::update_selection_by_keyboard(v, ui))
-	    // 	.unwrap_or(prev_selection)
-	    new_selection
+
+	    // update selection by mouse and keyboard
+	    let keyboard = Self::update_selection_by_keyboard(clamped, ui);
+	    let new_selection = if keyboard != clamped{
+		keyboard
+	    } else {
+		scroll.inner.unwrap_or(clamped)
+	    };
+
+	    // update viewed scroll area after updating the selection
+	    let selection_pos = new_selection.into_inner() as f32 * row_height_with_spacing;
+	    scroll.state.offset.y = scroll.state.offset.y
+		.at_least(selection_pos - rect_height + row_height_with_spacing)
+		.at_most(selection_pos);
+	    scroll.state.store(ui.ctx(), scroll.id);
+
+	    new_selection.map(|i|i.at_most(self.items.len()-1))
 	}
     }
 
