@@ -66,7 +66,7 @@ impl eframe::App for Snotter {
 	    let cursor = search_bar.state.ccursor_range();
 	    if let Some(AutocompleteOutput::Chosen(_v)) =
 		AutocompletePopup::new(file_candidates, &search_bar.response)
-		.show(ui) {
+		.show(ui, &search_bar.response) {
 		    let p: PathBuf = _v.0;
 		    let completion = p.file_name().unwrap().to_string_lossy();
 

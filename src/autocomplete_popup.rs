@@ -1,5 +1,5 @@
 
-use eframe::{egui::{self, Widget, WidgetText}, emath::NumExt};
+use eframe::{egui::{self, WidgetText}, emath::NumExt};
 
 #[derive(Debug)]
 pub(crate) struct AutocompletePopup<C>
@@ -7,7 +7,7 @@ where
     C: Clone + Into<WidgetText>,
 {
     items: Vec<C>,
-    parent: egui::Response,
+    id: egui::Id,
 }
 
 
@@ -27,27 +27,17 @@ impl<T: Copy> Copy for AutocompleteOutput<T> {}
 
 use AutocompleteOutput::*;
 
-// #[derive(Clone, Default)]
-// struct AutocompleteState{
-//     selection: Selection,
-//     scroll_offset: f32
-// }
-
 type Selection = AutocompleteOutput<usize>;
 impl<C> AutocompletePopup<C>
 where
     C: Clone + Into<WidgetText> + std::fmt::Debug,
 
 {
-    pub fn id (&self) -> egui::Id{
-	self.parent.id.with("::ac")
-    }
-
     pub fn new(items: impl IntoIterator<Item=C>,
 	       parent: &egui::Response) -> Self{
 	Self{
 	    items: items.into_iter().collect(),
-	    parent: parent.clone(),
+	    id: parent.id.with("::ac"),
 	}
     }
 
@@ -64,24 +54,25 @@ where
 	}
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) -> Option<AutocompleteOutput<C>>{
-	if self.parent.gained_focus() || self.parent.changed(){
-	    ui.memory().open_popup(self.id());
+    pub fn show(self, ui: &mut egui::Ui, parent: &egui::Response)
+		-> Option<AutocompleteOutput<C>>{
+	if parent.gained_focus() || parent.changed(){
+	    ui.memory().open_popup(self.id);
 	    if self.items.is_empty(){
 		ui.memory().close_popup();
 	    }
 	}
 
 	let popup_response = egui::popup_below_widget(
-	    ui, self.id(), &self.parent, self.make_completion_widget()
+	    ui, self.id, parent, self.make_completion_widget()
 	);
 
 	if let Some(Chosen(_)) = dbg!(popup_response) {
-	    ui.memory().data.remove::<Selection>(self.id());
+	    ui.memory().data.remove::<Selection>(self.id);
 	    ui.memory().close_popup();
-	    self.parent.request_focus();
+	    parent.request_focus();
 	} else if let Some(selection) = popup_response{
-	    ui.memory().data.insert_temp(self.id(), selection)
+	    ui.memory().data.insert_temp(self.id, selection)
 	}
 	popup_response.map(|c|c.map(|i|self.items[i].clone()))
     }
@@ -89,7 +80,7 @@ where
     fn make_completion_widget(&self) -> impl FnOnce(&mut egui::Ui) -> Selection + '_{
 	|ui: &mut egui::Ui|{
 	    let prev_selection = *ui.memory().data
-		.get_temp_mut_or_default::<Selection>(self.id());
+		.get_temp_mut_or_default::<Selection>(self.id);
 
 	    // draw
 	    let row_height = ui.text_style_height(&egui::TextStyle::Body);
@@ -153,19 +144,6 @@ fn check_mouse_interactions((response, i): (egui::Response, usize)) -> Option<Se
 	None
     }
 }
-
-
-impl<C> Widget for AutocompletePopup<C>
-where
-    C: Clone + Into<WidgetText> + std::fmt::Debug{
-
-    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
-
-	self.show(ui);
-	self.parent
-    }
-}
-
 
 
 impl AutocompleteOutput<usize> {
