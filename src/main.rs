@@ -21,7 +21,10 @@ fn main() {
     eframe::run_native(
         "eframe template",
         options,
-        Box::new(|_cc| Box::new(app::Snotter::default())),
+        Box::new(|cc| {
+	    cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
+	    Box::new(app::Snotter::default())
+	}),
     );
 }
 
