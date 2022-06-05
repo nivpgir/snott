@@ -12,7 +12,8 @@ fn main() {
         decorated: false,
         transparent: true,
         min_window_size: Some(egui::vec2(320.0, 100.0)),
-        ..Default::default()
+        resizable: true,
+	..Default::default()
     };
 
     // tracing_subscriber::fmt::init();
