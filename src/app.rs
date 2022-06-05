@@ -6,16 +6,19 @@ use crate::autocomplete_popup::{AutocompleteOutput, AutocompletePopup};
 
 #[derive(Debug)]
 pub(crate) struct Snotter {
-    snots_dir: PathBuf,
-    search_query: String
+    snots_dir: Option<PathBuf>,
+    search_query: String,
+    selected_file: Option<String>
 }
 
 impl Default for Snotter {
     fn default() -> Self{
 	Self {
-	    snots_dir: PathBuf::from_str(&std::env::var("HOME")
-					 .unwrap_or_else(|_| "".to_string())).unwrap(),
-	    search_query: Default::default()
+	    // snots_dir: PathBuf::from_str(&std::env::var("HOME")
+	    // 				 .unwrap_or_else(|_| "".to_string())).ok(),
+	    snots_dir: PathBuf::new().with_file_name(".").canonicalize().ok(),
+	    search_query: Default::default(),
+	    selected_file: None
 	}
     }
 }
@@ -25,18 +28,19 @@ impl Default for Snotter {
 struct SyncTextBuffer<T: TextBuffer>(RwLock<RefCell<T>>);
 
 #[derive(Clone, Debug)]
-struct MyWidgetText<T>(T);
+struct WidgetTextWrap<T>(T);
 
-impl std::fmt::Display for MyWidgetText<PathBuf>{
+impl std::fmt::Display for WidgetTextWrap<PathBuf>{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 	write!(f, "{}",
-	       self.0.to_path_buf().file_name()
+	       self.0
+	       .to_path_buf().file_name()
 	       .expect("failed to get filename!")
 	       .to_string_lossy())
     }
 }
 
-impl<T> Deref for MyWidgetText<T>{
+impl<T> Deref for WidgetTextWrap<T>{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -44,53 +48,79 @@ impl<T> Deref for MyWidgetText<T>{
     }
 }
 
-impl<T> DerefMut for MyWidgetText<T>{
+impl<T> DerefMut for WidgetTextWrap<T>{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<MyWidgetText<PathBuf>> for WidgetText{
-    fn from(other: MyWidgetText<PathBuf>) -> Self {
-        other.to_string_lossy().to_string().into()
+impl From<WidgetTextWrap<PathBuf>> for WidgetText{
+    fn from(other: WidgetTextWrap<PathBuf>) -> Self {
+        other.display().to_string().into()
     }
 }
 
 impl eframe::App for Snotter {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-	let files: Vec<_> = self.snots_dir.read_dir().unwrap()
-	    .map(|f|f.unwrap()).collect();
-	let file_candidates: Vec<_> = files.iter()
-	    .filter_map(|f|f.file_name().to_string_lossy().to_string()
-			.contains(self.search_query.as_str())
-			.then(||MyWidgetText(f.path())))
-	    .collect();
-        custom_window_frame(ctx, frame, "snote", |ui|{
-	    ui.label(&self.snots_dir.to_string_lossy().to_string());
-	    egui::widgets::global_dark_light_mode_switch(ui);
+        custom_window_frame(ctx, frame, "snott", |ui|{
+	    ui.horizontal_top(|ui|{
+		egui::widgets::global_dark_light_mode_switch(ui);
+		if self.snots_dir.is_none() ||
+		    ui.button(&self.snots_dir.as_ref().unwrap().display().to_string())
+		    .clicked() {
+			self.snots_dir = rfd::FileDialog::new().pick_folder();
+		    }
+	    });
+	    ui.vertical_centered_justified(|ui|{
 
-	    let search_bar = egui::TextEdit::singleline(&mut self.search_query)
-		.desired_width(ui.available_width()).show(ui);
+		let notes: Vec<_> = self.get_matching_notes().iter()
+		    .map(|f|WidgetTextWrap(f.to_path_buf())).collect();
 
-	    let ac_output = AutocompletePopup::new(file_candidates, &search_bar.response)
-		.show(ui, &search_bar.response);
-	    self.update_from_autocomplete(ac_output, ctx, search_bar);
 
+		let search_bar = egui::TextEdit::singleline(&mut self.search_query).show(ui);
+
+		if let Some(note_file) = &mut self.selected_file{
+		    ui.code_editor(note_file);
+		}
+		let ac_output = AutocompletePopup::new(notes, &search_bar.response)
+		    .show(ui, &search_bar.response);
+		self.update_from_autocomplete(ac_output, ctx, search_bar);
+	    });
 	})
     }
 }
 
-type ACItem = AutocompleteOutput<MyWidgetText<PathBuf>>;
+
+
+
+
+type ACItem = AutocompleteOutput<WidgetTextWrap<PathBuf>>;
 impl Snotter{
-    fn update_query_from_autocomplete(&mut self, chosen: MyWidgetText<PathBuf>){
+    fn get_matching_notes(&self) -> Vec<PathBuf> {
+	if let Some(dir) = &self.snots_dir{
+	    dir.read_dir().map(
+	    |d|d.filter_map(std::result::Result::ok)
+		.filter(|f|f.path().extension() == Some("snot".as_ref()))
+		.filter_map(|f|f.file_type().ok().and_then(|f_t|f_t.is_file().then(||f.path())))
+		.filter(|f|f.to_string_lossy().contains(self.search_query.as_str()))
+		.collect()
+	    ).unwrap_or_default()
+	} else {
+	    vec![]
+	}
+    }
+
+    fn select_file_from_autocomplete(&mut self, chosen: WidgetTextWrap<PathBuf>){
 	self.search_query = chosen.to_string();
+	self.selected_file = std::fs::read_to_string(&chosen.0).ok()
+	    .or_else(||Some(format!("failed to read {:?}", chosen.0.as_os_str())));
     }
 
     fn update_from_autocomplete(&mut self, s: Option<ACItem>,
 				ctx: &egui::Context,
 				search_bar: TextEditOutput){
 	if let Some(AutocompleteOutput::Chosen(chosen)) = s {
-	    self.update_query_from_autocomplete(chosen);
+	    self.select_file_from_autocomplete(chosen);
 	    self.update_cursor_from_autocomplete(ctx, search_bar);
 
 	}
