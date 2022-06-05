@@ -67,7 +67,7 @@ where
 	    ui, self.id, parent, self.make_completion_widget()
 	);
 
-	if let Some(Chosen(_)) = dbg!(popup_response) {
+	if let Some(Chosen(_)) = popup_response {
 	    ui.memory().data.remove::<Selection>(self.id);
 	    ui.memory().close_popup();
 	    parent.request_focus();
