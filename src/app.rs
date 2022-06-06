@@ -1,6 +1,6 @@
-use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, sync::RwLock};
+use std::{ops::{Deref, DerefMut}, path::PathBuf};
 
-use eframe::egui::{self, TextBuffer, WidgetText, text_edit::{CCursorRange, TextEditOutput}};
+use eframe::egui::{self, WidgetText, text_edit::{CCursorRange, TextEditOutput}};
 
 use crate::{autocomplete_popup::{AutocompleteOutput, AutocompletePopup}, snote_formatter};
 

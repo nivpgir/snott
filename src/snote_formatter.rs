@@ -9,7 +9,7 @@ use crate::snote;
 fn simple_text_layout(ui: &egui::Ui, text: &str) -> Arc<egui::Galley>{
     ui.fonts().layout_job(
 	egui::text::LayoutJob::simple(text.to_string(),
-				      egui::TextStyle::Monospace.resolve(&ui.style()),
+				      egui::TextStyle::Monospace.resolve(ui.style()),
 				      egui::Color32::BLACK,
 				      0.0
 	))
