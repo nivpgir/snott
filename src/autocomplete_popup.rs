@@ -74,7 +74,11 @@ where
 	} else if let Some(selection) = popup_response{
 	    ui.memory().data.insert_temp(self.id, selection)
 	}
-	popup_response.map(|c|c.map(|i|self.items[i].clone()))
+	if let Some(c) = popup_response{
+	    self.items.get(c.into_inner()).map(|v| c.map(|_|v.clone()))
+	} else {
+	    None
+	}
     }
 
     fn make_completion_widget(&self) -> impl FnOnce(&mut egui::Ui) -> Selection + '_{
@@ -120,7 +124,7 @@ where
 		.at_most(selection_pos);
 	    scroll.state.store(ui.ctx(), scroll.id);
 
-	    new_selection.map(|i|i.at_most(self.items.len()-1))
+	    new_selection.map(|i|i.at_most(self.items.len().saturating_sub(1)))
 	}
     }
 
