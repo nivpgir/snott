@@ -52,7 +52,7 @@ pub enum SNote {
 mod tests {
     use chumsky::Parser;
 
-    use crate::{SNote, block, blocks, headline, newline_padding, snote};
+    use crate::snote::{SNote, block, blocks, headline, newline_padding, snote};
 
     #[test]
     fn parse_block(){
