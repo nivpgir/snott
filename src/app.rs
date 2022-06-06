@@ -1,31 +1,15 @@
-use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr, sync::RwLock};
+use std::{cell::RefCell, ops::{Deref, DerefMut}, path::PathBuf, sync::RwLock};
 
 use eframe::egui::{self, TextBuffer, WidgetText, text_edit::{CCursorRange, TextEditOutput}};
 
-use crate::autocomplete_popup::{AutocompleteOutput, AutocompletePopup};
+use crate::{autocomplete_popup::{AutocompleteOutput, AutocompletePopup}, snote_formatter};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Snotter {
-    snots_dir: Option<PathBuf>,
+    snots_dir: PathBuf,
     search_query: String,
     selected_file: Option<String>
 }
-
-impl Default for Snotter {
-    fn default() -> Self{
-	Self {
-	    // snots_dir: PathBuf::from_str(&std::env::var("HOME")
-	    // 				 .unwrap_or_else(|_| "".to_string())).ok(),
-	    snots_dir: PathBuf::new().with_file_name(".").canonicalize().ok(),
-	    search_query: Default::default(),
-	    selected_file: None
-	}
-    }
-}
-
-
-#[derive(Default)]
-struct SyncTextBuffer<T: TextBuffer>(RwLock<RefCell<T>>);
 
 #[derive(Clone, Debug)]
 struct WidgetTextWrap<T>(T);
@@ -63,25 +47,18 @@ impl From<WidgetTextWrap<PathBuf>> for WidgetText{
 impl eframe::App for Snotter {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         custom_window_frame(ctx, frame, "snott", |ui|{
-	    ui.horizontal_top(|ui|{
-		egui::widgets::global_dark_light_mode_switch(ui);
-		if self.snots_dir.is_none() ||
-		    ui.button(&self.snots_dir.as_ref().unwrap().display().to_string())
-		    .clicked() {
-			self.snots_dir = rfd::FileDialog::new().pick_folder();
-		    }
-	    });
 	    ui.vertical_centered_justified(|ui|{
-
-		let notes: Vec<_> = self.get_matching_notes().iter()
-		    .map(|f|WidgetTextWrap(f.to_path_buf())).collect();
-
+		self.top_bar(ui);
 
 		let search_bar = egui::TextEdit::singleline(&mut self.search_query).show(ui);
 
 		if let Some(note_file) = &mut self.selected_file{
-		    ui.code_editor(note_file);
+
+		    ui.add(egui::TextEdit::multiline(note_file)
+			   .layouter(&mut snote_formatter::snote_layouter));
 		}
+		let notes: Vec<_> = self.get_matching_notes().iter()
+		    .map(|f|WidgetTextWrap(f.to_path_buf())).collect();
 		let ac_output = AutocompletePopup::new(notes, &search_bar.response)
 		    .show(ui, &search_bar.response);
 		self.update_from_autocomplete(ac_output, ctx, search_bar);
@@ -90,24 +67,27 @@ impl eframe::App for Snotter {
     }
 }
 
-
-
-
-
 type ACItem = AutocompleteOutput<WidgetTextWrap<PathBuf>>;
 impl Snotter{
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+	ui.horizontal_top(|ui|{
+	    egui::widgets::global_dark_light_mode_switch(ui);
+	    if ui.button(&self.snots_dir.display().to_string())
+		.clicked() {
+		    self.snots_dir = rfd::FileDialog::new().pick_folder()
+			.unwrap_or_else(|| self.snots_dir.clone());
+		}
+	});
+
+    }
     fn get_matching_notes(&self) -> Vec<PathBuf> {
-	if let Some(dir) = &self.snots_dir{
-	    dir.read_dir().map(
+	self.snots_dir.read_dir().map(
 	    |d|d.filter_map(std::result::Result::ok)
 		.filter(|f|f.path().extension() == Some("snot".as_ref()))
 		.filter_map(|f|f.file_type().ok().and_then(|f_t|f_t.is_file().then(||f.path())))
 		.filter(|f|f.to_string_lossy().contains(self.search_query.as_str()))
 		.collect()
-	    ).unwrap_or_default()
-	} else {
-	    vec![]
-	}
+	).unwrap_or_default()
     }
 
     fn select_file_from_autocomplete(&mut self, chosen: WidgetTextWrap<PathBuf>){
