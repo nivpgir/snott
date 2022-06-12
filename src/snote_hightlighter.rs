@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chumsky::Parser;
 use eframe::{egui::{self, TextFormat}};
 
-use crate::snote;
+use crate::snote_parser;
 
 fn simple_text_layout(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     let format = simple_format(ui);
@@ -15,7 +15,7 @@ fn simple_text_layout(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
     )
 }
 pub fn snote_layouter(ui: &egui::Ui, text: &str, _wrap_width: f32) -> Arc<egui::Galley> {
-    let job = snote::snote()
+    let job = snote_parser::snote()
         .parse(text)
         .map(|sections| {
             let layout_sections = sections.iter().map(|section| {
@@ -37,11 +37,11 @@ pub fn snote_layouter(ui: &egui::Ui, text: &str, _wrap_width: f32) -> Arc<egui::
     ui.fonts().layout_job(job)
 }
 
-impl snote::SNote {
+impl snote_parser::SNoteSection {
     fn highlight_format(&self, ui: &egui::Ui) -> TextFormat {
         match self {
-            snote::SNote::Paragraph(_) => Self::paragraph_format(ui),
-            snote::SNote::Headline(_) => Self::headline_format(ui),
+            snote_parser::SNoteSection::Paragraph(_) => Self::paragraph_format(ui),
+            snote_parser::SNoteSection::Headline(_) => Self::headline_format(ui),
         }
     }
 
