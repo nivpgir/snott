@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 chumsky = "0.8.0"
-eframe = "*"
+eframe = "0.18"
 rfd = "0.8"

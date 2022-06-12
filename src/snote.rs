@@ -1,143 +1,234 @@
+use std::ops::Range;
+
 use chumsky::{prelude::*, text::newline};
 
 fn line_end() -> impl Parser<char, Option<char>, Error = Simple<char>> {
     newline().to(Some('\n')).or(end().to(None))
-
 }
 
 fn headline() -> impl Parser<char, SNote, Error = Simple<char>> {
-    just("* ").ignore_then(take_until(line_end()))
-	.map(|(headline, _)|
-	     SNote::Headline(headline.iter().collect::<String>())
-	)
+    just("* ")
+        .ignore_then(take_until(line_end()))
+        .map_with_span(|_, sp|
+		       SNote::Headline(sp.start..sp.end))
 }
 
-fn newline_padding(amount: usize) -> impl Parser<char, SNote, Error = Simple<char>> {
-    newline().repeated().at_least(amount)
-	.map(|v|SNote::NewlinePadding(v.len()))
+fn newlines_or_end(amount: usize) -> impl Parser<char, usize, Error = Simple<char>> {
+    newline()
+        .repeated()
+	.at_least(1)
+        .map(|s| Some(s.len()))
+        .or(end().to(None))
+        .try_map(move |nls, span|
+		 match nls{
+		     Some(nl_count) if nl_count >= amount => Ok(nl_count),
+		     None => Ok(0),
+		     Some(nl_count) =>
+			 Err(Simple::custom(span, format!("not enough newlines ({})", nl_count)))
+		 })
 }
-
 fn block() -> impl Parser<char, SNote, Error = Simple<char>> {
-    take_until(newline_padding(2)
-	       .or(newline_padding(1).then(end()).map(|(p, _)| p))
-               .or(end().to(SNote::NewlinePadding(0))))
-	.map(|(block, _)| SNote::Block(block.iter().collect::<String>()))
+    let block_separator = newlines_or_end(2).map_with_span(|_, s|s).rewind();
+    any().rewind()
+	.ignore_then(take_until(block_separator))
+	.map_with_span(|(_, pad_span), sp| SNote::Paragraph(sp.start..pad_span.end))
 }
 
 fn blocks() -> impl Parser<char, Vec<SNote>, Error = Simple<char>> {
-    newline_padding(1).or_not().then(any().rewind().ignore_then(block())).repeated()
-	.map(|padded_block|padded_block.into_iter().flat_map(|(padding, block)| {
-	    if let Some(padding) = padding {
-		vec![padding, block]
-	    } else {
-		vec![block]
-	    }
-	}).collect())
+    block().map(|b|[b])
+	.separated_by(newlines_or_end(2))
+	.flatten()
 }
 
 pub fn snote() -> impl Parser<char, Vec<SNote>, Error = Simple<char>> {
-    headline()
-	.then(blocks())
-	.map(|(headline, mut blocks)| {blocks.insert(0, headline); blocks})
+    headline().chain(
+	blocks()
+    )
 }
 
+type SnoteSpan = Range<usize>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SNote {
-    NewlinePadding(usize),
-    Block(String),
-    Headline(String)
+    Paragraph(SnoteSpan),
+    Headline(SnoteSpan),
+}
+
+
+use SNote::*;
+impl SNote {
+    pub fn span(&self) -> Range<usize> {
+	match self{
+            Paragraph(sp) |
+            Headline(sp) => sp.clone()
+	}
+    }
+    pub fn content_span(&self) -> Range<usize> {
+	match self{
+            Paragraph(sp) |
+            Headline(sp) => sp.clone()
+	}
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
+
     use chumsky::Parser;
 
-    use crate::snote::{SNote, block, blocks, headline, newline_padding, snote};
+    use crate::snote::{SNote, block, blocks, headline, newlines_or_end, snote};
 
     #[test]
-    fn parse_block(){
-	let paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz\n\n";
-	let ast = block().parse(paragraph);
-	eprintln!("{:?}", ast);
-	assert!(ast.is_ok());
-	assert_eq!(SNote::Block(paragraph.trim_end().to_string()),
-		   ast.unwrap());
+    fn parse_block() {
+        let paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz\n\n";
+        let (ast, _err) = block().parse_recovery_verbose(paragraph);
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+        assert_eq!(SNote::Paragraph(0..paragraph.len()), ast.unwrap());
     }
     #[test]
-    fn parse_a_file_ending_block(){
-	let paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz";
-	let ast = block().parse(paragraph);
-	eprintln!("{:?}", ast);
-	assert!(ast.is_ok());
-	assert_eq!(SNote::Block(paragraph.trim_end().to_string()),
-		   ast.unwrap());
-    }
-
-    #[test]
-    fn parse_headline(){
-	let the_headline = "headline";
-	let ast = headline().parse(format!("* {}", the_headline));
-	eprintln!("{:?}", ast);
-	assert!(ast.is_ok());
-	assert_eq!(SNote::Headline(the_headline.to_string()),
-		   ast.unwrap());
+    fn parse_a_file_ending_block() {
+        let paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz";
+        let (ast, _err) = block().parse_recovery_verbose(paragraph);
+        eprintln!("{:?}", _err);
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+        assert_eq!(SNote::Paragraph(0..paragraph.len()), ast.unwrap());
     }
 
     #[test]
-    fn parse_many_blocks(){
-	let the_paragraph = "the\nfirst\nparagraph";
-	let the_second_paragraph = "the second\n paragraph";
-	let the_blocks = format!("{}\n\n{}\n\n", the_paragraph, the_second_paragraph);
-	eprintln!("{}", &the_blocks);
-	let ast = blocks().parse(the_blocks);
-	assert!(ast.is_ok());
-	assert_eq!(vec![
-	    SNote::Block(the_paragraph.trim_end().to_string()),
-	    SNote::Block(the_second_paragraph.trim_end().to_string()),
-	], ast.unwrap());
-    }
-    #[test]
-    fn parse_headline_and_paragraph(){
-	let the_headline = "headline";
-	let the_paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz\n\n";
-	let note = format!("* {}\n{}", the_headline, the_paragraph);
-	let ast = snote().parse(note);
-	eprintln!("{:?}", ast);
-	assert!(ast.is_ok());
-	assert_eq!((
-	    vec![
-		SNote::Headline(the_headline.to_string()),
-		SNote::Block(the_paragraph.trim_end().to_string()),
-	    ]
-	), ast.unwrap());
-    }
-    #[test]
-    fn parse_headline_and_many_paragraphs(){
-	let the_headline = "headline";
-	let the_paragraph = "the\nfirst\nparagraph";
-	let the_second_paragraph = "the second\n paragraph";
-	let note = format!("* {}\n{}\n\n{}\n\n", the_headline, the_paragraph, the_second_paragraph);
-	let ast = snote().parse(note);
-	eprintln!("{:?}", ast);
-	assert!(ast.is_ok());
-	assert_eq!((
-	    vec![
-		SNote::Headline(the_headline.to_string()),
-		SNote::Block(the_paragraph.trim_end().to_string()),
-		SNote::Block(the_second_paragraph.trim_end().to_string()),
-	    ]
-	), ast.unwrap());
+    fn parse_headline() {
+        let the_headline = "headline";
+        let (ast, _err) = headline().parse_recovery_verbose(format!("* {}", the_headline));
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+        assert_eq!(SNote::Headline(0..the_headline.len()+2), ast.unwrap());
     }
 
     #[test]
-    fn parse_padding(){
-	assert_eq!(SNote::NewlinePadding(0), newline_padding(0).parse("").unwrap());
-	assert_eq!(SNote::NewlinePadding(1), newline_padding(0).parse("\r\n").unwrap());
-	assert_eq!(SNote::NewlinePadding(1), newline_padding(0).parse("\n").unwrap());
-	assert_eq!(SNote::NewlinePadding(2), newline_padding(0).parse("\n\n").unwrap());
-	assert_eq!(SNote::NewlinePadding(2), newline_padding(0).parse("\n\r\n").unwrap());
-	assert_eq!(SNote::NewlinePadding(3), newline_padding(0).parse("\r\n\r\n\r\n").unwrap());
-	assert_eq!(SNote::NewlinePadding(3), newline_padding(3).parse("\r\n\r\n\r\n").unwrap());
-	assert!(newline_padding(4).parse("\r\n\r\n\r\n").is_err());
+    fn parse_many_blocks() {
+        let the_paragraph = "the\nfirst\nparagraph";
+        let the_second_paragraph = "the second\n paragraph";
+        let the_third_paragraph = "the third\n paragraph";
+	let (the_blocks, expected) = make_paragraphs([the_paragraph,
+						      the_second_paragraph,
+						      the_third_paragraph]);
+        eprintln!("{}", &the_blocks);
+        let (ast, _err) = blocks().parse_recovery_verbose(the_blocks);
+
+	if !_err.is_empty() {dbg!(_err);}
+        assert!(ast.is_some());
+        assert_eq!(
+            expected.into_iter().map(SNote::Paragraph).collect::<Vec<_>>(),
+            ast.unwrap()
+        );
+    }
+    fn move_range(r: &Range<usize>, offset: usize) -> Range<usize>{
+	(r.start+offset)..(r.end+offset)
+    }
+    #[test]
+    fn parse_headline_and_paragraph() {
+        let headline_str = "headline";
+        let paragraph_str = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz";
+        let (note, expected) = make_snote(headline_str, [paragraph_str]);
+        let (ast, _err) = snote().parse_recovery_verbose(note);
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+        assert_eq!(
+            expected,
+            ast.unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_headline_and_many_paragraphs() {
+        let the_headline = "headline";
+        let the_paragraph = "the\nfirst\nparagraph";
+        let the_second_paragraph = "the second\n paragraph";
+        let (note, expected) = make_snote(the_headline, [the_paragraph, the_second_paragraph]);
+        let (ast, _err) = snote().parse_recovery_verbose(note);
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+        assert_eq!(
+            expected,
+            ast.unwrap()
+        );
+    }
+    #[test]
+    fn snote_sections_are_adjacent() {
+        let the_headline = "headline";
+        let the_paragraph = "the\nfirst\nparagraph";
+        let the_second_paragraph = "the second\n paragraph";
+	let (s, expected_snot) = make_snote(the_headline, [the_paragraph, the_second_paragraph]);
+	dbg!(&s);
+        let (ast, _err) = snote().parse_recovery_verbose(s);
+        eprintln!("{:?}", ast);
+        assert!(ast.is_some());
+	ast.as_ref().unwrap().windows(2)
+	    .map(|sections|(sections[0].clone(), sections[1].clone()))
+	    .for_each(|(s1, s2)|{
+	    dbg!(&s1, &s2);
+	    assert_eq!(s1.span().end, s2.span().start);
+	});
+        assert_eq!(
+            expected_snot,
+            ast.unwrap()
+        );
+    }
+
+    fn make_paragraphs(paragraphs: impl IntoIterator<Item=impl AsRef<str>>)
+		       -> (String, Vec<Range<usize>>){
+	paragraphs.into_iter().scan(0, |l, p|{
+	    let padded = format!("{}\n\n", p.as_ref());
+	    let span = move_range(&(0..padded.len()), *l);
+	    *l += padded.len();
+	    Some((padded, span))
+	}).unzip()
+    }
+
+    fn make_snote(headline: impl AsRef<str>, paragraphs: impl IntoIterator<Item=impl AsRef<str>>)
+		  -> (String, Vec<SNote>){
+	let headline_text = format!("* {}\n", headline.as_ref());
+	let headline_span = SNote::Headline(0..headline_text.len());
+	let (par_text, par_spans) = make_paragraphs(paragraphs);
+	let spans = std::iter::once(headline_span).into_iter()
+	    .chain(par_spans.into_iter()
+		   .map(|sp|move_range(&sp, headline_text.len()))
+		   .map(SNote::Paragraph))
+	    .collect();
+	(headline_text + &par_text, spans)
+    }
+
+    #[test]
+    fn parse_padding() {
+        assert_eq!(
+            0,
+            newlines_or_end(0).parse("").unwrap()
+        );
+        assert_eq!(
+            1,
+            newlines_or_end(0).parse("\r\n").unwrap()
+        );
+        assert_eq!(
+            1,
+            newlines_or_end(0).parse("\n").unwrap()
+        );
+        assert_eq!(
+            2,
+            newlines_or_end(0).parse("\n\n").unwrap()
+        );
+        assert_eq!(
+            2,
+            newlines_or_end(0).parse("\n\r\n").unwrap()
+        );
+        assert_eq!(
+            3,
+            newlines_or_end(0).parse("\r\n\r\n\r\n").unwrap()
+        );
+        assert_eq!(
+            3,
+            newlines_or_end(3).parse("\r\n\r\n\r\n").unwrap()
+        );
+        assert!(newlines_or_end(4).parse("\r\n\r\n\r\n").is_err());
     }
 }
