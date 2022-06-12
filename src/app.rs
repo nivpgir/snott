@@ -10,8 +10,8 @@ use eframe::egui::{
 };
 
 use crate::{
-    autocomplete_popup::{AutocompleteOutput, AutocompletePopup},
-    snote_hightlighter,
+    snote,
+    autocomplete_popup::{AutocompleteOutput, AutocompletePopup}
 };
 
 #[derive(Debug, Default)]
@@ -64,10 +64,13 @@ impl eframe::App for Snotter {
                 let search_bar = egui::TextEdit::singleline(&mut self.search_query).show(ui);
 
                 if let Some(note_file) = &mut self.selected_file {
-                    ui.add(
-                        egui::TextEdit::multiline(note_file)
-                            .layouter(&mut snote_hightlighter::snote_layouter),
-                    );
+                    if ui.add(egui::TextEdit::multiline(note_file)
+                           .layouter(&mut snote::snote_layouter),
+                    ).changed() {
+			true
+		    } else {
+			false
+		    };
                 }
                 let notes: Vec<_> = self
                     .get_matching_notes()

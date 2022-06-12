@@ -43,7 +43,7 @@ fn blocks() -> impl Parser<char, Vec<SNoteSection>, Error = Simple<char>> {
 pub fn snote() -> impl Parser<char, Vec<SNoteSection>, Error = Simple<char>> {
     headline().chain(
 	blocks()
-    )
+    ).padded().or_not().map(|m|m.unwrap_or_default())
 }
 
 type SnoteSpan = Range<usize>;
@@ -76,8 +76,13 @@ mod tests {
 
     use chumsky::Parser;
 
-    use crate::snote::{SNoteSection, block, blocks, headline, newlines_or_end, snote};
+    use super::{SNoteSection, block, blocks, headline, newlines_or_end, snote};
 
+    #[test]
+    fn empty_snote_is_valid(){
+	let (ast, _err) = snote().parse_recovery_verbose("");
+	assert!(ast.is_some());
+    }
     #[test]
     fn parse_block() {
         let paragraph = "abcd efg hi h klmnop\nqrs tuv\nw\nx\nyz\n\n";

@@ -3,8 +3,9 @@
 
 mod app;
 pub(crate) mod autocomplete_popup;
-mod snote_parser;
-mod snote_hightlighter;
+mod snote;
+// mod snote_parser;
+// mod snote_hightlighter;
 
 // hide console window on Windows in release
 use eframe::egui;
