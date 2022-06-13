@@ -1,5 +1,4 @@
 use std::convert::Infallible;
-use std::{error::Error, path::Path};
 use std::str::FromStr;
 
 use chumsky::Parser;
@@ -19,7 +18,7 @@ pub struct SNote{
 
 #[cfg(test)]
 mod tests{
-    use std::{env::temp_dir, str::FromStr};
+    use std::str::FromStr;
 
     use crate::snote::SNoteSection;
 
@@ -42,15 +41,6 @@ mod tests{
     }
 
     #[test]
-    fn save_to_file(){
-	let output_file = temp_dir().with_file_name("temp_note.snot");
-	SNote::from_str("").unwrap()
-	    .save_to(&output_file).unwrap();
-
-	assert!(output_file.exists())
-    }
-
-    #[test]
     fn update_contents(){
 	let mut note = SNote::from_str("").unwrap();
 	assert_eq!(&note.raw_content, "");
@@ -67,11 +57,6 @@ impl SNote {
 	    raw_content: Default::default(),
 	    sections: snote().parse("").unwrap_or_default()
 	}
-    }
-
-    pub(crate) fn save_to(&self, output_file: &Path) -> Result<(), Box<dyn Error>> {
-	std::fs::write(output_file, &self.raw_content)?;
-	Ok(())
     }
 
     pub(crate) fn set_raw(mut self, new_content: impl AsRef<str>) -> Self{

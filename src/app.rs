@@ -1,24 +1,32 @@
-use std::{
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-};
+use std::{error::Error, fmt::Display, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr};
 
-use eframe::egui::{
-    self,
-    text_edit::{CCursorRange, TextEditOutput},
-    WidgetText,
-};
+use eframe::egui::{self, Sense, WidgetText, popup_below_widget, text_edit::{CCursorRange, TextEditOutput, TextEditState}};
 
-use crate::{
-    snote,
-    autocomplete_popup::{AutocompleteOutput, AutocompletePopup}
-};
+use crate::{autocomplete_popup::{AutocompleteOutput, AutocompletePopup}, snote};
 
 #[derive(Debug, Default)]
 pub(crate) struct Snotter {
     snots_dir: PathBuf,
     search_query: String,
-    selected_file: Option<String>,
+    note: (Option<PathBuf>, Option<snote::SNote>),
+}
+
+struct ValueButton<T>{
+    button: egui::Button,
+    pub value: T
+}
+
+impl<T: Default + Display> Default for ValueButton<T>{
+    fn default() -> Self {
+	let val: T = Default::default();
+        Self { button: egui::Button::new(val.to_string()), value: val }
+    }
+}
+
+impl<T: Display> egui::Widget for ValueButton<T>{
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        ui.add(self.button)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -61,41 +69,56 @@ impl eframe::App for Snotter {
             ui.vertical_centered_justified(|ui| {
                 self.top_bar(ui);
 
-                let search_bar = egui::TextEdit::singleline(&mut self.search_query).show(ui);
+		ui.add(self.search_bar(ctx));
 
-                if let Some(note_file) = &mut self.selected_file {
-                    if ui.add(egui::TextEdit::multiline(note_file)
-                           .layouter(&mut snote::snote_layouter),
-                    ).changed() {
-			true
-		    } else {
-			false
-		    };
-                }
-                let notes: Vec<_> = self
-                    .get_matching_notes()
-                    .iter()
-                    .map(|f| WidgetTextWrap(f.to_path_buf()))
-                    .collect();
-                let ac_output = AutocompletePopup::new(notes, &search_bar.response)
-                    .show(ui, &search_bar.response);
-                self.update_from_autocomplete(ac_output, ctx, search_bar);
-            });
-        });
+		if self.snote_editor(ui).changed(){
+		    self.save_note().unwrap_or(())
+		};
+	    });
+	})
     }
 }
+
 
 type ACItem = AutocompleteOutput<WidgetTextWrap<PathBuf>>;
 impl Snotter {
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_top(|ui| {
             egui::widgets::global_dark_light_mode_switch(ui);
-            if ui.button(&self.snots_dir.display().to_string()).clicked() {
-                self.snots_dir = rfd::FileDialog::new()
-                    .pick_folder()
-                    .unwrap_or_else(|| self.snots_dir.clone());
-            }
+	    ui.add(self.snot_dir_button())
         });
+    }
+    fn snot_dir_button(&mut self) -> impl egui::Widget + '_{
+	|ui: &mut egui::Ui|{
+	    let button = ui.button(self.snots_dir.display().to_string());
+	    if button.clicked() {
+		self.snots_dir = rfd::FileDialog::new()
+		    .pick_folder()
+		    .unwrap_or_else(|| self.snots_dir.clone());
+	    }
+	    button
+	}
+    }    fn search_bar<'u, 'c: 'u>(&'u mut self, ctx: &'c egui::Context) -> impl egui::Widget + 'u{
+	|ui: &mut egui::Ui|{
+	    let TextEditOutput { response, state, .. } =
+		egui::TextEdit::singleline(&mut self.search_query).show(ui);
+	    let notes: Vec<_> = self
+		.get_matching_notes()
+		.iter()
+		.map(|f| WidgetTextWrap(f.to_path_buf()))
+		.collect();
+	    let ac_output = AutocompletePopup::new(notes, &response)
+		.show(ui, &response);
+	    self.update_from_autocomplete(ac_output, ctx, state, response.id);
+	    response
+	}
+    }
+
+    fn save_note(&self) -> Result<(), Box<dyn Error>> {
+	if let (Some(file_path), Some(note)) = &self.note{
+	    std::fs::write(file_path, &note.raw_content)?;
+	}
+	Ok(())
     }
     fn get_matching_notes(&self) -> Vec<PathBuf> {
         self.snots_dir
@@ -114,32 +137,66 @@ impl Snotter {
             .unwrap_or_default()
     }
 
-    fn select_file_from_autocomplete(&mut self, chosen: WidgetTextWrap<PathBuf>) {
-        self.search_query = chosen.to_string();
-        self.selected_file = std::fs::read_to_string(&chosen.0)
-            .ok()
-            .or_else(|| Some(format!("failed to read {:?}", chosen.0.as_os_str())));
-    }
-
     fn update_from_autocomplete(
         &mut self,
         s: Option<ACItem>,
         ctx: &egui::Context,
-        search_bar: TextEditOutput,
+        search_bar: TextEditState,
+	id: egui::Id
     ) {
         if let Some(AutocompleteOutput::Chosen(chosen)) = s {
-            self.select_file_from_autocomplete(chosen);
-            self.update_cursor_from_autocomplete(ctx, search_bar);
+            self.select_file_from_autocomplete(chosen.0);
+            self.update_cursor_from_autocomplete(ctx, search_bar, id);
         }
     }
-    fn update_cursor_from_autocomplete(&self, ctx: &egui::Context, mut search_bar: TextEditOutput) {
-        if let Some(c) = search_bar.state.ccursor_range() {
+
+    fn select_file_from_autocomplete(&mut self, chosen: PathBuf) {
+        let file_content = std::fs::read_to_string(&chosen)
+	    .ok()
+	    .or_else(||Some(format!("failed to read {}", chosen.display())));
+        let note = file_content
+	    .map(|s|
+		 snote::SNote::from_str(&s)
+		 .unwrap_or_else(|_|snote::SNote::new().set_raw(s))
+	    );
+        self.search_query = chosen.display().to_string();
+	self.note = (Some(chosen), note);
+    }
+
+
+    fn update_cursor_from_autocomplete(&self, ctx: &egui::Context,
+				       mut state: TextEditState,
+				       id: egui::Id) {
+        if let Some(c) = state.ccursor_range() {
             let [_, last_cursor] = c.sorted();
             let cursor = CCursorRange::one(last_cursor + self.search_query.len());
-            search_bar.state.set_ccursor_range(Some(cursor));
-            search_bar.state.store(ctx, search_bar.response.id);
+            state.set_ccursor_range(Some(cursor));
+            state.store(ctx, id);
         }
     }
+
+    // fn snote_editor(&mut self, note: &mut SNote) -> impl egui::Widget + '_{
+    // fn snote_editor(&'_ mut self, ui: &mut egui::Ui) -> Option<egui::Response>{
+    fn snote_editor(&'_ mut self, ui: &mut egui::Ui) -> egui::Response{
+	self.note.1.as_mut().map(|note|{
+	    egui::ScrollArea::both().show(ui, |ui|{
+		let te = ui.add(egui::TextEdit::multiline(&mut note.raw_content)
+				.layouter(&mut snote::snote_layouter));
+		ui.scroll_to_cursor(None);
+		te
+	    }).inner
+	}).unwrap_or_else(||empty_widget(ui))
+    }
+}
+
+fn empty_widget(ui: &mut egui::Ui) -> egui::Response{
+    ui.allocate_response(
+	egui::Vec2::ZERO,
+	Sense{
+	    click: false,
+	    drag: false,
+	    focusable: false,
+	})
 }
 
 fn custom_window_frame(
