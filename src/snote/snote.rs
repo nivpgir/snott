@@ -1,7 +1,8 @@
+use std::convert::Infallible;
 use std::{error::Error, path::Path};
 use std::str::FromStr;
 
-use chumsky::{Parser, prelude::Simple};
+use chumsky::Parser;
 // use chumsky::error::Error;
 
 use super::{SNoteSection, snote};
@@ -9,8 +10,9 @@ use super::{SNoteSection, snote};
 
 
 
-struct SNote{
-    raw_content: String,
+#[derive(Debug)]
+pub struct SNote{
+    pub raw_content: String,
     sections: Vec<SNoteSection>
 }
 
@@ -19,7 +21,16 @@ struct SNote{
 mod tests{
     use std::{env::temp_dir, str::FromStr};
 
+    use crate::snote::SNoteSection;
+
     use super::SNote;
+
+    #[test]
+    fn failed_parsing_creates_a_single_paragraph() {
+	let content = "not a valid note because theres no headline\nlalala";
+	let note = SNote::from_str(content).unwrap();
+	assert_eq!(note.sections, vec![SNoteSection::Paragraph(0..content.len())])
+    }
 
     #[test]
     fn create_snote() {
@@ -42,10 +53,12 @@ mod tests{
     #[test]
     fn update_contents(){
 	let mut note = SNote::from_str("").unwrap();
-	let new_content = "* headline";
-	note.set_raw(new_content);
+	assert_eq!(&note.raw_content, "");
 
-	assert_eq!(note.raw_content, new_content);
+	let new_content = "* headline";
+	note = note.set_raw(new_content);
+	assert_eq!(&note.raw_content, new_content);
+
     }
 }
 impl SNote {
@@ -61,24 +74,27 @@ impl SNote {
 	Ok(())
     }
 
-    pub(crate) fn set_raw(&mut self, new_content: impl AsRef<str>) {
-        self.raw_content = new_content.as_ref().to_string()
+    pub(crate) fn set_raw(mut self, new_content: impl AsRef<str>) -> Self{
+        self.raw_content = new_content.as_ref().to_string();
+	self.update_sections()
+    }
+
+    fn update_sections(mut self) -> Self{
+	self.sections = snote()
+	    .parse(self.raw_content.clone())
+            .unwrap_or_else(|_| vec![SNoteSection::Paragraph(0..self.raw_content.len())]);
+	self
     }
 }
 
 
 impl FromStr for SNote{
-    type Err=String;
+    type Err=Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let sections = snote().parse(s)
-	    .map_err(|e|e.into_iter()
-		     .reduce(chumsky::Error::merge)
-		     .unwrap_or_else(|| Simple::custom(0..0, "unknown"))
-		     .to_string())?;
 	Ok(Self {
-	    sections,
+	    sections: Default::default(),
 	    raw_content: s.to_string()
-	})
+	}.update_sections())
     }
 }

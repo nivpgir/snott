@@ -43,7 +43,7 @@ fn blocks() -> impl Parser<char, Vec<SNoteSection>, Error = Simple<char>> {
 pub fn snote() -> impl Parser<char, Vec<SNoteSection>, Error = Simple<char>> {
     headline().chain(
 	blocks()
-    ).padded().or_not().map(|m|m.unwrap_or_default())
+    ).padded().or(end().to(Default::default()))
 }
 
 type SnoteSpan = Range<usize>;
