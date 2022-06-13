@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chumsky::Parser;
-use eframe::egui::{self, TextFormat};
+use eframe::{egui::{self, TextFormat}, epaint::text::TextWrapping};
 
 use super::{SNoteSection, snote};
 
@@ -26,9 +26,14 @@ pub fn snote_layouter(ui: &egui::Ui, text: &str, _wrap_width: f32) -> Arc<egui::
 		    format: section.highlight_format(ui)
 		}
             }).collect();
+	    let text_wrapping = TextWrapping{
+		max_width: ui.max_rect().width(),
+		..Default::default()
+	    };
             egui::text::LayoutJob{
 		text: text.to_string(),
 		sections: layout_sections,
+		wrap: text_wrapping,
 		..Default::default()
 	    }
 
