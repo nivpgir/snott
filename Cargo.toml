@@ -9,3 +9,13 @@ edition = "2021"
 chumsky = "0.8.0"
 eframe = "0.18"
 rfd = "0.8"
+chrono = "0.4"
+dirs = "4.0"
+
+[[bin]]
+name = "snotter"
+path = "src/snotter_main.rs"
+
+[[bin]]
+name = "quick-snote"
+path = "src/quick_snote_main.rs"
