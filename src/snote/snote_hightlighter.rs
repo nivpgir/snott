@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chumsky::Parser;
-use eframe::{egui::{self, TextFormat}, epaint::text::TextWrapping};
+use eframe::{egui::{self, TextBuffer, TextFormat}, epaint::text::TextWrapping};
 
 use super::{SNoteSection, snote};
 
@@ -72,5 +72,16 @@ fn simple_format(ui: &egui::Ui) -> TextFormat {
 	font_id: egui::TextStyle::Body.resolve(ui.style()),
         color: ui.style().visuals.text_color(),
 	..Default::default()
+    }
+}
+
+pub fn snote_widget(note: &mut dyn TextBuffer) -> impl egui::Widget + '_{
+    |ui: &mut egui::Ui| -> egui::Response{
+	egui::ScrollArea::both().show(ui, |ui|{
+	    let te = ui.add(egui::TextEdit::multiline(note)
+			    .layouter(&mut snote_layouter));
+	    ui.scroll_to_cursor(None);
+	    te
+	}).inner
     }
 }

@@ -1,13 +1,7 @@
+// hide console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![cfg_attr(debug_assertions, allow(dead_code))]
 
-mod app;
-pub(crate) mod autocomplete_popup;
-mod snote;
-// mod snote_parser;
-// mod snote_hightlighter;
-
-// hide console window on Windows in release
 use eframe::egui;
 
 fn main() {
@@ -26,7 +20,7 @@ fn main() {
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
-            Box::new(app::Snotter::default())
+            Box::new(snote2::app::Snotter::default())
         }),
     );
 }

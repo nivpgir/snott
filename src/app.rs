@@ -1,11 +1,11 @@
-use std::{error::Error, fmt::Display, ops::{Deref, DerefMut}, path::PathBuf, str::FromStr};
+use std::{error::Error, fmt::Display, ops::{Deref, DerefMut, Not}, path::PathBuf, str::FromStr};
 
-use eframe::egui::{self, Sense, WidgetText, popup_below_widget, text_edit::{CCursorRange, TextEditOutput, TextEditState}};
+use eframe::egui::{self, Sense, WidgetText, text_edit::{CCursorRange, TextEditOutput, TextEditState}};
 
-use crate::{autocomplete_popup::{AutocompleteOutput, AutocompletePopup}, snote};
+use crate::{autocomplete_popup::{AutocompleteOutput, AutocompletePopup}, custom_window, snote::{self, snote_widget}};
 
 #[derive(Debug, Default)]
-pub(crate) struct Snotter {
+pub struct Snotter {
     snots_dir: PathBuf,
     search_query: String,
     note: (Option<PathBuf>, Option<snote::SNote>),
@@ -65,7 +65,7 @@ impl From<WidgetTextWrap<PathBuf>> for WidgetText {
 
 impl eframe::App for Snotter {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        custom_window_frame(ctx, frame, "snott", |ui| {
+        custom_window::custom_window_frame(ctx, frame, "snott", |ui| {
             ui.vertical_centered_justified(|ui| {
                 self.top_bar(ui);
 
@@ -98,18 +98,45 @@ impl Snotter {
 	    }
 	    button
 	}
-    }    fn search_bar<'u, 'c: 'u>(&'u mut self, ctx: &'c egui::Context) -> impl egui::Widget + 'u{
+    }
+    fn search_bar<'u, 'c: 'u>(&'u mut self, ctx: &'c egui::Context) -> impl egui::Widget + 'u{
 	|ui: &mut egui::Ui|{
 	    let TextEditOutput { response, state, .. } =
-		egui::TextEdit::singleline(&mut self.search_query).show(ui);
+		egui::TextEdit::singleline(&mut self.search_query)
+		.show(ui);
 	    let notes: Vec<_> = self
 		.get_matching_notes()
 		.iter()
 		.map(|f| WidgetTextWrap(f.to_path_buf()))
 		.collect();
-	    let ac_output = AutocompletePopup::new(notes, &response)
-		.show(ui, &response);
-	    self.update_from_autocomplete(ac_output, ctx, state, response.id);
+	    if response.gained_focus() || response.changed() {
+		if notes.is_empty().not() {
+		    ui.memory().open_popup(response.id.with("::ac"));
+		}
+            }
+	    let ac_output = {
+		// let popup_response =
+		//     egui::popup_below_widget(ui, self.id, response, self.make_completion_widget());
+
+		// if let Some(Chosen(_)) = popup_response {
+		//     ui.memory().data.remove::<Selection>(self.id);
+		//     ui.memory().close_popup();
+		//     parent.request_focus();
+		// } else if let Some(selection) = popup_response {
+		//     ui.memory().data.insert_temp(self.id, selection)
+		// }
+		// if let Some(c) = popup_response {
+		//     self.items.get(c.into_inner()).map(|v| c.map(|_| v.clone()))
+		// } else {
+		//     None
+		// }
+		// ui.push_id("::ac", |ui|{
+		egui::popup_below_widget(ui, response.id.with("::ac"), &response,
+					 AutocompletePopup::new(notes, response.clone())
+					 .make_completion_widget())
+		// }
+	    };
+	    self.update_from_autocomplete(ac_output.flatten(), ctx, state, response.id);
 	    response
 	}
     }
@@ -175,19 +202,14 @@ impl Snotter {
         }
     }
 
-    // fn snote_editor(&mut self, note: &mut SNote) -> impl egui::Widget + '_{
-    // fn snote_editor(&'_ mut self, ui: &mut egui::Ui) -> Option<egui::Response>{
     fn snote_editor(&'_ mut self, ui: &mut egui::Ui) -> egui::Response{
 	self.note.1.as_mut().map(|note|{
-	    egui::ScrollArea::both().show(ui, |ui|{
-		let te = ui.add(egui::TextEdit::multiline(&mut note.raw_content)
-				.layouter(&mut snote::snote_layouter));
-		ui.scroll_to_cursor(None);
-		te
-	    }).inner
+	    ui.add(snote_widget(&mut note.raw_content))
 	}).unwrap_or_else(||empty_widget(ui))
     }
 }
+
+
 
 fn empty_widget(ui: &mut egui::Ui) -> egui::Response{
     ui.allocate_response(
@@ -199,79 +221,3 @@ fn empty_widget(ui: &mut egui::Ui) -> egui::Response{
 	})
 }
 
-fn custom_window_frame(
-    ctx: &egui::Context,
-    frame: &mut eframe::Frame,
-    title: &str,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    use egui::*;
-    let text_color = ctx.style().visuals.text_color();
-
-    // Height of the title bar
-    let height = 28.0;
-
-    CentralPanel::default()
-        .frame(Frame::none())
-        .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            let painter = ui.painter();
-
-            // Paint the frame:
-            painter.rect(
-                rect.shrink(1.0),
-                10.0,
-                ctx.style().visuals.window_fill(),
-                Stroke::new(1.0, text_color),
-            );
-
-            // Paint the title:
-            painter.text(
-                rect.center_top() + vec2(0.0, height / 2.0),
-                Align2::CENTER_CENTER,
-                title,
-                FontId::proportional(height - 2.0),
-                text_color,
-            );
-
-            // Paint the line under the title:
-            painter.line_segment(
-                [
-                    rect.left_top() + vec2(2.0, height),
-                    rect.right_top() + vec2(-2.0, height),
-                ],
-                Stroke::new(1.0, text_color),
-            );
-
-            // Add the close button:
-            let close_response = ui.put(
-                Rect::from_min_size(rect.left_top(), Vec2::splat(height)),
-                Button::new("X").frame(false),
-            );
-            if close_response.clicked() {
-                frame.quit();
-            }
-
-            // Interact with the title bar (drag to move window):
-            let title_bar_rect = {
-                let mut rect = rect;
-                rect.max.y = rect.min.y + height;
-                rect
-            };
-            let title_bar_response =
-                ui.interact(title_bar_rect, Id::new("title_bar"), Sense::drag());
-            if title_bar_response.drag_started() {
-                frame.drag_window();
-            }
-
-            // Add the contents:
-            let content_rect = {
-                let mut rect = rect;
-                rect.min.y = title_bar_rect.max.y;
-                rect
-            }
-            .shrink(4.0);
-            let mut content_ui = ui.child_ui(content_rect, *ui.layout());
-            add_contents(&mut content_ui);
-        });
-}
