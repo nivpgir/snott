@@ -21,7 +21,7 @@ fn main() {
 	.map(tilde).unwrap().as_ref()
 	.into();
     eframe::run_native(
-        "quick",
+        "Quick Snote",
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
