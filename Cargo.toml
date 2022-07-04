@@ -11,6 +11,8 @@ eframe = "0.18"
 rfd = "0.8"
 chrono = "0.4"
 dirs = "4.0"
+config = "0.13.1"
+shellexpand = "2.1"
 
 [[bin]]
 name = "snotter"
