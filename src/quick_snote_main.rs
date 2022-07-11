@@ -16,16 +16,19 @@ fn main() {
         ..Default::default()
     };
 
-    let sync_dir: PathBuf = settings
-	.get_string("sync_dir").as_ref()
-	.map(tilde).unwrap().as_ref()
-	.into();
+
     eframe::run_native(
         "Quick Snote",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
+	    let sync_dir: PathBuf = settings
+		.get_string("sync_dir").as_ref()
+		.map(tilde).unwrap().as_ref()
+		.into();
+	    let time_format = settings.get_string("timestamp_format").unwrap();
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
-            Box::new(QuickSnote::new(sync_dir))
+            Box::new(QuickSnote::new(sync_dir)
+		     .with_time_format(time_format))
         }),
     );
 }
@@ -40,7 +43,8 @@ fn build_config() -> config::Config{
     Config::builder()
         .add_source::<config::File<_,_>>(config_file)
         .add_source(config::Environment::with_prefix("SNOTT"))
-        .set_default("sync_dir",home_dir.display().to_string()).unwrap()
+        .set_default("sync_dir", home_dir.display().to_string()).unwrap()
+        .set_default("timestamp_format", "%Y-%m-%d_%H-%M-%S").unwrap()
         .build()
         .unwrap()
 }
