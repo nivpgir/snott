@@ -18,7 +18,7 @@ fn main() {
 
 
     eframe::run_native(
-        "Quick Snote",
+        "float-snote",
         options,
         Box::new(move |cc| {
 	    let sync_dir: PathBuf = settings
